@@ -6,6 +6,12 @@ El objetivo de este tutorial es aprender desde cero a utilizar wit.ai e integrar
 
 De forma adicional, este tutorial explica cómo añadir una palabra clave (hotword o wake-word, en inglés), para que la aplicación no esté continuamente escuchando, sino que se despierte al escuchar la palabra especial "coach". Dicha palabra será reconocida offline, sin necesidad de conexión a internet.
 
+![Esquema wit.ai de aplicación Fitness Voice](./images/esquema-wit-fitness-voice.png)
+
+Aquí tienes un vídeo de la aplicación web "Fitness Voice", te recomiendo verlo para empezar:
+
+[![Video Fitness Voice demo](https://img.youtube.com/vi/b5CAPU8lar4/0.jpg)](https://www.youtube.com/watch?v=b5CAPU8lar4)
+
 ## Introducción al diseño para voz
 
 En el diseño de aplicaciones de voz, tienes que tener en cuenta algunas cosas que son diferentes en comparación con las aplicaciones web o aplicaciones móviles:
@@ -105,3 +111,164 @@ Ahora es tu momento de practicar y añadir nuevos utterances para que el modelo 
 - Añade nuevos utterances en los intents ya existentes.
 
 - Crea un nuevo intent llamado "stats" para que los usuarios puedan indicar que quieren ver sus estadísticas.
+
+- Crea un nuevo intent llamado "set_voice", que sirva en la aplicación para elegir diferentes voces (pista: necesitarás crear una "entity" en este intent).
+
+- Crea un intent llamado "gohome" para volver al inicio de la aplicación web.
+
+- Crea un intent llamado "help" para dar al usuario más información sobre el funcionamiento de la aplicación.
+
+- También puedes crear un intent llamado "repeat", para repetir el último mensaje que diste al usuario.
+
+Al llegar a este punto, la sección "Intents" de tu app wit debe tener esta apariencia:
+
+![wit list intents](./images/list-intents.png)
+
+Ahora, accede a la sección "settings" para copiar el token que necesitas para utilizar la API:
+
+![wit settings](./images/settings.png)
+
+## Añadir wit y voz en una aplicación web
+
+Para continuar, descarga el código de la aplicación web "Fitness Voice" (<https://github.com/javichur/fitness-voice>). Te servirá de plantilla para poner voz a tus aplicaciones web.
+
+Presta atención a la carpeta `js` de este proyecto, en ella están los ficheros que puedes reutilizar en otras aplicaciones web. Cada fichero sirve para lo siguiente:
+
+- **app.js:** es el script principal de la aplicación web. Desde él se inicializan las variables necesarias, se llama a la API de wit y se procesa la respuesta de dicha API.
+
+- **hotword.js:** es la clase de detectar de forma offline la palabra "coach" cuando la pronuncie el usuario. Para ello, utiliza la librería tensorflowjs. Esta palabra que "despierta" al sistema, se le conoce como "hotword" o "wake-word" en inglés. Puedes entrenar a este modelo para que reconozca otras palabras. La forma más sencilla de entrenarlo es en esta página web: <https://teachablemachine.withgoogle.com/train/audio> . Una vez hayas entrenado al modelo para que reconozca una nueva palabra hotword, deberás descargar el modelo entrenado y guardarlo en `/assets/coach-audio-model`.
+
+- **listenCommand.js:** es la clase encargada de convertir a texto la frase que pronuncia el usuario. Esta clase se activa solo después de que HotWord detecte la palabra "coach". Después de convertir a texto la frase del usuario, se enviará el texto a la API de wit y se volverá a activar el detector de hotword.
+
+- **Settings.js:** en este fichero está la configuración de la aplicación web (el token de API wit, la precisión deseada en la detección de la hotword, el idioma, etc).
+
+- **SoundEffect.js:** aquí está el código que reproduce algunos efectos de sonido, como campanas o aplausos. ¡No todo son palabras en las aplicaciones de voz! :D
+
+- **ui.js:** en este fichero está el código para modificar aspectos visuales de la aplicación web (mostrar las estadísticas, ocultar una pantalla, etc.).
+
+- **Voice.js:** es la clase encargada de sintetizar en voz las frases que queremos decir al usuario.
+
+- **VoiceClone.js:** si el usuario ha pedido cambiar la voz de la aplicación, entonces se usará esta clase, que en lugar de sintetizar cadenas de texto en voz de ordenador, utiliza ficheros mp3 generados por inteligencia artificial y que simulan voces de personajes famosos. Por ejemplo, prueba a decirle a la aplicación "I want to change voice to Bill" y a continuación inicia el entrenamiento diciendo "I want to train surfing". En lugar de escuchar una voz sintética de ordenador, oirás una voz similar a la de una persona famosa.
+
+La técnica utilizada para generar estas voces realistas se llama Voice Cloning y actualmente solo es necesario un audio de muestra de pocos segundos y la cadena de texto que queremos reproducir, para que el sistema recree la voz de forma realista. Puedes obtener más información sobre esto en el siguiente link: <https://github.com/CorentinJ/Real-Time-Voice-Cloning>.
+
+Para terminar, quiero que nos detengamos en el código del fichero `app.js`, en el método `init()` que inicializa la aplicación web, para que veas lo fácil que resulta incorporarlo en tu proyecto:
+
+```javascript
+export async function init() {
+  UI.initUI();
+
+  // 1. It will run handlerHotwordDetected() when the hotword is detected.
+  HotWord.isIdle = true;
+  HotWord.handlerHotWordDetected = handlerHotwordDetected;
+
+  await HotWord.createHotwordModelIfNotExists(); // 2. Initialize hotword detection.
+  HotWord.listenHotwordOffline();
+
+  // 3. It will run witRequest(message) after listening a right user voice.
+  ListenCommand.handlerlistened = witRequest;
+
+  // 4. It will run handlerListenCommandEnd() when listening ends.
+  ListenCommand.handlerEnd = handlerListenCommandEnd; // clue: it reactivates hotword detection.
+
+  Voice.selectVoice(Settings.LANG);
+  if (isFirstInit) { // 5. Welcome voice message
+    Voice.speak('Welcome to Fitness Voice, the AI voice-controlled trainer in your browser.');
+    isFirstInit = false;
+  }
+}
+
+function handlerHotwordDetected() {
+  UI.micAnimationPlay();
+
+  try {
+    ListenCommand.testSpeech(); // listening the command
+  } catch (error) {
+    console.log('error handlerHotwordDetected: ' + JSON.stringify(error));
+  }
+}
+
+function handlerListenCommandEnd() {
+  HotWord.isIdle = true; // activate hotword detection again.
+  UI.micAnimationPause();
+}
+```
+
+En el código anterior se está definiendo el funcionamiento que explicábamos al inicio del tutorial (lo recordamos en la imagen siguiente):
+
+- 1. Primero se configura qué hay que hacer si se detecta la palabra "coach" (`HotWord`). Y lo que habrá que hacer si se detecta es escuchar la frase del usuario con la clase `ListenCommand`.
+
+- 2. Después activamos la detección de `HotWord` de forma offline, usando la librería tensorflowjs. Esta detección offline es mucho más eficiente que una detección online, además de tener un enfoque de mayor privacidad para el usuario, ya que nada de lo que el usuario diga será enviado a internet a menos que antes se haya escuchado la palabra reservada "coach".
+
+- 3. Se configura que hay que llamar la API de wit después de escuchar por completo una frase del usuario. Es decir, la clase `ListenComand` terminará llamando a `witRequest`.
+
+- 4. Por último, se volverá a activar la detección de `HotWord`, que había sido desactivada justo después de escuchar la palabra "coach".
+
+![Esquema wit.ai de aplicación Fitness Voice](./images/esquema-wit-fitness-voice.png)
+
+Para terminar esta sección, vamos a ver el fragmento de código encargado de llamar a la API de wit y el método encargado de recibir la respuesta y procesarla:
+
+```javascript
+function witRequest(message) {
+  if (message !== '') {
+    $.ajax({
+      url: `https://api.wit.ai/message?v=${Settings.WIT_VERSION}&q=${message}`,
+      type: 'GET',
+      contentType: 'application/json',
+      headers: {
+        'Authorization': `Bearer ${Settings.WIT_TOKEN}`
+      },
+      success: function (result) {
+        witResponseHander(result);
+      },
+      error: function (error) {
+        alert('error' + JSON.stringify(error));
+      }
+    });
+  }
+}
+
+function witResponseHander(result) {
+  if (isWitNotUndertand(result)) {
+    Voice.speak('I\'m sorry, I can\'t understand. Repeat please.');
+    return;
+  }
+
+  const intent = result.intents[0];
+  switch (intent.name) {
+    case 'letsgo':
+      witIntentHandlerLetsGo();
+      break;
+    case 'set_training':
+      witIntentHandlerSetTraining(result);
+      break;
+    case 'help':
+      witIntentHandlerHelp();
+      break;
+    case 'gohome':
+      witIntentHandlerGoHome();
+      break;
+    case 'stats':
+      goTo('stats');
+      break;
+    case 'set_voice':
+      witIntentHandlerSetVoice(result);
+      break;
+    case 'repeat':
+      // TODO
+      break;
+  }
+}
+```
+
+## Conclusiones
+
+En este tutorial hemos empezado introduciendo puntos que hay que tener en cuenta en el diseño de aplicaciones de voz,
+
+Hemos explicado los conceptos de "utterance", "intent", "entity".
+
+Hemos aprendido desde cero cómo crear una app con wit.ai para tener procesamiento de lenguaje natural (NLP) vía API.
+
+También hemos visto con código fuente de ejemplo, cómo incluir en una aplicación web las llamadas necesarias a wit.ai, así como capacidades para escuchar al usuario de forma eficiente y segura (utilizando una hotword que detectamos offline) y responder al usuario con voz (voz sintética y voz generada con voice cloning).
+
+Espero que os haya gustado :) Puedes enviarme tus comentarios a través de <https://javiercampos.es>.
